@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader";
+import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader";
 import { FaceMesh } from "@mediapipe/face_mesh";
 
 const video = document.getElementById("video");
@@ -12,12 +12,12 @@ const renderer = new THREE.WebGLRenderer({ alpha: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 document.body.appendChild(renderer.domElement);
 
-camera.position.z = 2;
+camera.position.z = 3;
 
 let glassesModel;
-const loader = new GLTFLoader();
-loader.load("./assets/MOSCOT_ZEV_TT_SE.obj", (gltf) => {
-  glassesModel = gltf.scene;
+const loader = new OBJLoader();
+loader.load("./assets/MOSCOT_ZEV_TT_SE.obj", (object) => {
+  glassesModel = object;
   glassesModel.scale.set(0.05, 0.05, 0.05);
   scene.add(glassesModel);
 });
@@ -60,23 +60,25 @@ function alignGlasses(landmarks) {
   const rightEye = landmarks[263];
   const nose = landmarks[1];
 
-  // Position
+  // Position glasses based on the landmarks
   glassesModel.position.set(
     (leftEye.x + rightEye.x) / 2 - 0.5,
     -(leftEye.y + rightEye.y) / 2 + 0.5,
-    -nose.z * 2
+    -nose.z * 1.5 // Adjust depth
   );
 
-  // Scale
+  // Scale the glasses based on the distance between eyes
   const distance = Math.sqrt(
     Math.pow(rightEye.x - leftEye.x, 2) +
     Math.pow(rightEye.y - leftEye.y, 2)
   );
-  glassesModel.scale.set(distance * 5, distance * 5, distance * 5);
+  glassesModel.scale.set(distance * 0.6, distance * 0.6, distance * 0.6);
 }
 
 function animate() {
   requestAnimationFrame(animate);
+  
   renderer.render(scene, camera);
 }
+
 animate();
