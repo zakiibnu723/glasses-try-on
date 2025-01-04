@@ -16,7 +16,7 @@ camera.position.z = 2;
 
 let glassesModel;
 const loader = new GLTFLoader();
-loader.load("./assets/MOSCOT_ZEV_TT_SE.glb", (gltf) => {
+loader.load("./assets/MOSCOT_ZEV_TT_SE.obj", (gltf) => {
   glassesModel = gltf.scene;
   glassesModel.scale.set(0.05, 0.05, 0.05);
   scene.add(glassesModel);
