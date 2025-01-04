@@ -1,3 +1,4 @@
+
 import * as THREE from "three";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader";
 import { FaceMesh } from "@mediapipe/face_mesh";
@@ -22,6 +23,7 @@ loader.load("./assets/MOSCOT_ZEV_TT_SE.obj", (object) => {
   scene.add(glassesModel);
 });
 
+// Set up video stream and FaceMesh
 navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
   video.srcObject = stream;
 
@@ -46,13 +48,37 @@ navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
   });
 });
 
+// Handle face mesh results
 function onResults(results) {
   if (results.multiFaceLandmarks.length > 0) {
     const landmarks = results.multiFaceLandmarks[0];
+    
+    // Log landmarks to confirm detection
+    console.log("Face landmarks detected:", landmarks);
+    
+    // Draw the face landmarks on the canvas
+    drawLandmarks(landmarks);
+
     alignGlasses(landmarks);
   }
 }
 
+// Function to draw face landmarks on canvas for debugging
+function drawLandmarks(landmarks) {
+  const pointRadius = 2;
+  ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear the previous frame
+  ctx.fillStyle = "red";
+  
+  landmarks.forEach(landmark => {
+    const x = landmark.x * canvas.width;
+    const y = landmark.y * canvas.height;
+    ctx.beginPath();
+    ctx.arc(x, y, pointRadius, 0, 2 * Math.PI);
+    ctx.fill();
+  });
+}
+
+// Align glasses model with face landmarks
 function alignGlasses(landmarks) {
   if (!glassesModel) return;
 
@@ -75,9 +101,9 @@ function alignGlasses(landmarks) {
   glassesModel.scale.set(distance * 0.6, distance * 0.6, distance * 0.6);
 }
 
+// Animation loop to render the 3D scene
 function animate() {
   requestAnimationFrame(animate);
-  
   renderer.render(scene, camera);
 }
 
