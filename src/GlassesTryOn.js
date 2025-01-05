@@ -1,3 +1,4 @@
+
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { FaceMesh } from '@mediapipe/face_mesh';
@@ -16,74 +17,77 @@ export class GlassesTryOn {
         this.smoothingFactor = 0.5; // Increased for less delay
         this.currentPosition = new THREE.Vector3();
         this.currentRotation = new THREE.Euler();
-        
+
         // Touch control variables
-        this.isDragging = false;
-        this.previousTouch = { x: 0, y: 0 };
-        this.offsetPosition = new THREE.Vector3(0, 0, 0);
-        this.userScale = 1.0;
-        
+        this.baseScale = 0.3; // Increased base scale
+        this.userScaleFactor = 1.0;
+        this.userOffset = new THREE.Vector3(0, 0, 0);
+        this.lastTouchDistance = 0;
+        this.isAdjusting = false;
+        this.lastTouchX = 0;
+        this.lastTouchY = 0;
+
         // Bind touch event handlers
         this.setupTouchControls();
     }
 
     setupTouchControls() {
-        // Single touch for moving
+        this.canvas.style.pointerEvents = 'auto'; // Enable touch events on canvas
+
         this.canvas.addEventListener('touchstart', (e) => {
-            if (e.touches.length === 1) {
-                this.isDragging = true;
-                this.previousTouch.x = e.touches[0].clientX;
-                this.previousTouch.y = e.touches[0].clientY;
+            e.preventDefault();
+            this.isAdjusting = true;
+            
+            if (e.touches.length === 2) {
+                // Pinch to scale
+                this.lastTouchDistance = Math.hypot(
+                    e.touches[0].clientX - e.touches[1].clientX,
+                    e.touches[0].clientY - e.touches[1].clientY
+                );
+            } else if (e.touches.length === 1) {
+                // Single touch to move
+                this.lastTouchX = e.touches[0].clientX;
+                this.lastTouchY = e.touches[0].clientY;
             }
         });
 
         this.canvas.addEventListener('touchmove', (e) => {
-            if (e.touches.length === 1 && this.isDragging) {
-                const deltaX = (e.touches[0].clientX - this.previousTouch.x) * 0.01;
-                const deltaY = (e.touches[0].clientY - this.previousTouch.y) * 0.01;
-                
-                this.offsetPosition.x += deltaX;
-                this.offsetPosition.y -= deltaY;
+            e.preventDefault();
+            if (!this.model || !this.isAdjusting) return;
 
-                this.previousTouch.x = e.touches[0].clientX;
-                this.previousTouch.y = e.touches[0].clientY;
-            }
-            // Pinch to scale
-            else if (e.touches.length === 2) {
-                const dist = Math.hypot(
+            if (e.touches.length === 2) {
+                // Pinch to scale
+                const distance = Math.hypot(
                     e.touches[0].clientX - e.touches[1].clientX,
                     e.touches[0].clientY - e.touches[1].clientY
                 );
                 
-                if (this.previousPinchDistance) {
-                    const delta = (dist - this.previousPinchDistance) * 0.01;
-                    this.userScale = Math.max(0.5, Math.min(2.0, this.userScale + delta));
-                }
+                const scaleDelta = distance / this.lastTouchDistance;
+                this.userScaleFactor *= scaleDelta;
+                // Limit scale range
+                this.userScaleFactor = Math.max(0.5, Math.min(2.0, this.userScaleFactor));
                 
-                this.previousPinchDistance = dist;
+                this.lastTouchDistance = distance;
+            } else if (e.touches.length === 1) {
+                // Single touch to move
+                const deltaX = (e.touches[0].clientX - this.lastTouchX) * 0.005;
+                const deltaY = (e.touches[0].clientY - this.lastTouchY) * 0.005;
+                
+                this.userOffset.x += deltaX;
+                this.userOffset.y -= deltaY;
+                
+                // Limit movement range
+                this.userOffset.x = Math.max(-2, Math.min(2, this.userOffset.x));
+                this.userOffset.y = Math.max(-1, Math.min(1, this.userOffset.y));
+                
+                this.lastTouchX = e.touches[0].clientX;
+                this.lastTouchY = e.touches[0].clientY;
             }
         });
 
         this.canvas.addEventListener('touchend', () => {
-            this.isDragging = false;
-            this.previousPinchDistance = null;
+            this.isAdjusting = false;
         });
-
-        // Add double tap to reset
-        let lastTap = 0;
-        this.canvas.addEventListener('touchend', (e) => {
-            const currentTime = new Date().getTime();
-            const tapLength = currentTime - lastTap;
-            if (tapLength < 500 && tapLength > 0) {
-                this.resetAdjustments();
-            }
-            lastTap = currentTime;
-        });
-    }
-
-    resetAdjustments() {
-        this.offsetPosition.set(0, 0, 0);
-        this.userScale = 1.0;
     }
 
     async init() {
@@ -228,11 +232,11 @@ export class GlassesTryOn {
                 const centerY = (leftEye.y + rightEye.y) / 2;
                 const centerZ = (leftEye.z + rightEye.z) / 2;
 
-                // Create target position with offset and increased scale
+                // Create target position with user offset
                 const targetPosition = new THREE.Vector3(
-                    -(centerX - 0.5) * 8 + this.offsetPosition.x,  // Increased scale
-                    -(centerY - 0.5) * 8 + this.offsetPosition.y,  // Increased scale
-                    -centerZ * 5 + this.offsetPosition.z           // Increased scale
+                    -(centerX - 0.5) * 5 + this.userOffset.x,
+                    -(centerY - 0.5) * 5 + this.userOffset.y,
+                    -centerZ * 3
                 );
 
                 const nose = face[6];
@@ -251,17 +255,15 @@ export class GlassesTryOn {
                     Math.atan2(earDiff.y, earDiff.x) * 0.3
                 );
 
-                // Apply smoothing
-                this.lerpVector3(this.model.position, targetPosition, this.smoothingFactor);
-                this.lerpEuler(this.model.rotation, targetRotation, this.smoothingFactor);
+                // Apply smoothing only if not actively adjusting
+                if (!this.isAdjusting) {
+                    this.lerpVector3(this.model.position, targetPosition, this.smoothingFactor);
+                    this.lerpEuler(this.model.rotation, targetRotation, this.smoothingFactor);
+                }
 
                 // Apply user scale
-                const baseScale = 0.2; // Increased base scale
-                this.model.scale.set(
-                    baseScale * this.userScale,
-                    baseScale * this.userScale,
-                    baseScale * this.userScale
-                );
+                const finalScale = this.baseScale * this.userScaleFactor;
+                this.model.scale.set(finalScale, finalScale, finalScale);
             }
         }
     }
@@ -271,16 +273,47 @@ export class GlassesTryOn {
             const gltf = await this.loader.loadAsync(modelPath);
             this.model = gltf.scene;
             
-            // Increased initial scale
-            const baseScale = 0.2;
-            this.model.scale.set(baseScale, baseScale, baseScale);
+            // Set larger initial scale
+            const initialScale = this.baseScale * this.userScaleFactor;
+            this.model.scale.set(initialScale, initialScale, initialScale);
             
+            // Set initial position
             this.model.position.set(0, 0, 0);
             
             this.scene.add(this.model);
             console.log('Glasses model loaded successfully');
+
+            // Add touch instructions
+            this.showInstructions();
         } catch (error) {
             console.error('Error loading glasses model:', error);
             throw error;
         }
     }
+
+    showInstructions() {
+        const instructions = document.createElement('div');
+        instructions.style.cssText = `
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 20px;
+            font-family: Arial, sans-serif;
+            text-align: center;
+            z-index: 1000;
+        `;
+        instructions.innerHTML = 'Pinch to resize • Drag to adjust position';
+        document.body.appendChild(instructions);
+
+        // Hide instructions after 5 seconds
+        setTimeout(() => {
+            instructions.style.opacity = '0';
+            instructions.style.transition = 'opacity 0.5s';
+            setTimeout(() => instructions.remove(), 500);
+        }, 5000);
+    }
+}
