@@ -13,10 +13,77 @@ export class GlassesTryOn {
         this.faceMesh = null;
         this.loader = new GLTFLoader();
         this.isTracking = false;
-        // Add smoothing factors
-        this.smoothingFactor = 0.3; // Lower = smoother
+        this.smoothingFactor = 0.5; // Increased for less delay
         this.currentPosition = new THREE.Vector3();
         this.currentRotation = new THREE.Euler();
+        
+        // Touch control variables
+        this.isDragging = false;
+        this.previousTouch = { x: 0, y: 0 };
+        this.offsetPosition = new THREE.Vector3(0, 0, 0);
+        this.userScale = 1.0;
+        
+        // Bind touch event handlers
+        this.setupTouchControls();
+    }
+
+    setupTouchControls() {
+        // Single touch for moving
+        this.canvas.addEventListener('touchstart', (e) => {
+            if (e.touches.length === 1) {
+                this.isDragging = true;
+                this.previousTouch.x = e.touches[0].clientX;
+                this.previousTouch.y = e.touches[0].clientY;
+            }
+        });
+
+        this.canvas.addEventListener('touchmove', (e) => {
+            if (e.touches.length === 1 && this.isDragging) {
+                const deltaX = (e.touches[0].clientX - this.previousTouch.x) * 0.01;
+                const deltaY = (e.touches[0].clientY - this.previousTouch.y) * 0.01;
+                
+                this.offsetPosition.x += deltaX;
+                this.offsetPosition.y -= deltaY;
+
+                this.previousTouch.x = e.touches[0].clientX;
+                this.previousTouch.y = e.touches[0].clientY;
+            }
+            // Pinch to scale
+            else if (e.touches.length === 2) {
+                const dist = Math.hypot(
+                    e.touches[0].clientX - e.touches[1].clientX,
+                    e.touches[0].clientY - e.touches[1].clientY
+                );
+                
+                if (this.previousPinchDistance) {
+                    const delta = (dist - this.previousPinchDistance) * 0.01;
+                    this.userScale = Math.max(0.5, Math.min(2.0, this.userScale + delta));
+                }
+                
+                this.previousPinchDistance = dist;
+            }
+        });
+
+        this.canvas.addEventListener('touchend', () => {
+            this.isDragging = false;
+            this.previousPinchDistance = null;
+        });
+
+        // Add double tap to reset
+        let lastTap = 0;
+        this.canvas.addEventListener('touchend', (e) => {
+            const currentTime = new Date().getTime();
+            const tapLength = currentTime - lastTap;
+            if (tapLength < 500 && tapLength > 0) {
+                this.resetAdjustments();
+            }
+            lastTap = currentTime;
+        });
+    }
+
+    resetAdjustments() {
+        this.offsetPosition.set(0, 0, 0);
+        this.userScale = 1.0;
     }
 
     async init() {
@@ -30,6 +97,7 @@ export class GlassesTryOn {
             console.error('Initialization failed:', error);
         }
     }
+
 
     async setupScene() {
         this.scene = new THREE.Scene();
@@ -154,21 +222,19 @@ export class GlassesTryOn {
             const face = results.multiFaceLandmarks[0];
             
             if (this.model) {
-                // Calculate center point between eyes
                 const leftEye = face[133];
                 const rightEye = face[362];
                 const centerX = (leftEye.x + rightEye.x) / 2;
                 const centerY = (leftEye.y + rightEye.y) / 2;
                 const centerZ = (leftEye.z + rightEye.z) / 2;
 
-                // Create target position
+                // Create target position with offset and increased scale
                 const targetPosition = new THREE.Vector3(
-                    -(centerX - 0.5) * 5,  // Reverse X direction and reduce movement scale
-                    -(centerY - 0.5) * 5,  // Reduce movement scale
-                    -centerZ * 3           // Reduce depth movement
+                    -(centerX - 0.5) * 8 + this.offsetPosition.x,  // Increased scale
+                    -(centerY - 0.5) * 8 + this.offsetPosition.y,  // Increased scale
+                    -centerZ * 5 + this.offsetPosition.z           // Increased scale
                 );
 
-                // Calculate face rotation
                 const nose = face[6];
                 const leftEar = face[234];
                 const rightEar = face[454];
@@ -179,16 +245,23 @@ export class GlassesTryOn {
                     z: rightEar.z - leftEar.z
                 };
 
-                // Create target rotation
                 const targetRotation = new THREE.Euler(
-                    Math.atan2(nose.z, nose.y) * 0.5,        // Reduce head tilt
-                    -Math.atan2(earDiff.z, earDiff.x) * 0.5, // Reverse and reduce left/right rotation
-                    Math.atan2(earDiff.y, earDiff.x) * 0.3   // Reduce up/down rotation
+                    Math.atan2(nose.z, nose.y) * 0.5,
+                    -Math.atan2(earDiff.z, earDiff.x) * 0.5,
+                    Math.atan2(earDiff.y, earDiff.x) * 0.3
                 );
 
-                // Smooth position and rotation
+                // Apply smoothing
                 this.lerpVector3(this.model.position, targetPosition, this.smoothingFactor);
                 this.lerpEuler(this.model.rotation, targetRotation, this.smoothingFactor);
+
+                // Apply user scale
+                const baseScale = 0.2; // Increased base scale
+                this.model.scale.set(
+                    baseScale * this.userScale,
+                    baseScale * this.userScale,
+                    baseScale * this.userScale
+                );
             }
         }
     }
@@ -198,10 +271,10 @@ export class GlassesTryOn {
             const gltf = await this.loader.loadAsync(modelPath);
             this.model = gltf.scene;
             
-            // Adjust initial scale (you may need to modify these values)
-            this.model.scale.set(0.1, 0.1, 0.1);
+            // Increased initial scale
+            const baseScale = 0.2;
+            this.model.scale.set(baseScale, baseScale, baseScale);
             
-            // Set initial position
             this.model.position.set(0, 0, 0);
             
             this.scene.add(this.model);
@@ -211,4 +284,3 @@ export class GlassesTryOn {
             throw error;
         }
     }
-}
