@@ -13,6 +13,10 @@ export class GlassesTryOn {
         this.faceMesh = null;
         this.loader = new GLTFLoader();
         this.isTracking = false;
+        // Add smoothing factors
+        this.smoothingFactor = 0.3; // Lower = smoother
+        this.currentPosition = new THREE.Vector3();
+        this.currentRotation = new THREE.Euler();
     }
 
     async init() {
@@ -62,13 +66,22 @@ export class GlassesTryOn {
         return new Promise((resolve, reject) => {
             navigator.mediaDevices.getUserMedia({
                 video: {
-                    width: 1280,
-                    height: 720,
-                    facingMode: 'user'
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                    facingMode: "user"
                 }
             })
             .then(stream => {
                 this.video.srcObject = stream;
+                this.video.style.display = 'block'; // Ensure video is visible
+                this.video.style.transform = 'scaleX(-1)'; // Mirror the video
+                this.video.style.width = '100%';
+                this.video.style.height = '100%';
+                this.video.style.objectFit = 'cover';
+                this.video.style.position = 'absolute';
+                this.video.style.top = '0';
+                this.video.style.left = '0';
+                
                 this.video.onloadedmetadata = () => {
                     this.video.play();
                     resolve();
@@ -104,6 +117,22 @@ export class GlassesTryOn {
         this.isTracking = true;
     }
 
+    lerp(start, end, factor) {
+        return start + (end - start) * factor;
+    }
+
+    lerpVector3(current, target, factor) {
+        current.x = this.lerp(current.x, target.x, factor);
+        current.y = this.lerp(current.y, target.y, factor);
+        current.z = this.lerp(current.z, target.z, factor);
+    }
+
+    lerpEuler(current, target, factor) {
+        current.x = this.lerp(current.x, target.x, factor);
+        current.y = this.lerp(current.y, target.y, factor);
+        current.z = this.lerp(current.z, target.z, factor);
+    }
+
     async startTracking() {
         if (!this.isTracking) return;
         
@@ -132,11 +161,11 @@ export class GlassesTryOn {
                 const centerY = (leftEye.y + rightEye.y) / 2;
                 const centerZ = (leftEye.z + rightEye.z) / 2;
 
-                // Update glasses position
-                this.model.position.set(
-                    (centerX - 0.5) * 10,  // Increased scale factor
-                    -(centerY - 0.5) * 10, // Increased scale factor
-                    -centerZ * 10          // Increased scale factor
+                // Create target position
+                const targetPosition = new THREE.Vector3(
+                    -(centerX - 0.5) * 5,  // Reverse X direction and reduce movement scale
+                    -(centerY - 0.5) * 5,  // Reduce movement scale
+                    -centerZ * 3           // Reduce depth movement
                 );
 
                 // Calculate face rotation
@@ -150,9 +179,16 @@ export class GlassesTryOn {
                     z: rightEar.z - leftEar.z
                 };
 
-                this.model.rotation.y = Math.atan2(earDiff.z, earDiff.x);
-                this.model.rotation.z = Math.atan2(earDiff.y, earDiff.x);
-                this.model.rotation.x = Math.atan2(nose.z, nose.y);
+                // Create target rotation
+                const targetRotation = new THREE.Euler(
+                    Math.atan2(nose.z, nose.y) * 0.5,        // Reduce head tilt
+                    -Math.atan2(earDiff.z, earDiff.x) * 0.5, // Reverse and reduce left/right rotation
+                    Math.atan2(earDiff.y, earDiff.x) * 0.3   // Reduce up/down rotation
+                );
+
+                // Smooth position and rotation
+                this.lerpVector3(this.model.position, targetPosition, this.smoothingFactor);
+                this.lerpEuler(this.model.rotation, targetRotation, this.smoothingFactor);
             }
         }
     }
