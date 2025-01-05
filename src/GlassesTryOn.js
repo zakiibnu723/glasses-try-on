@@ -17,8 +17,6 @@ export class GlassesTryOn {
         this.smoothingFactor = 0.5; // Increased for less delay
         this.currentPosition = new THREE.Vector3();
         this.currentRotation = new THREE.Euler();
-        this.verticalOffset = 0.2; // Adjust this value to move glasses up/down
-        this.baseScale = 0.25;
 
         // Touch control variables
         this.baseScale = 0.3; // Increased base scale
@@ -123,22 +121,10 @@ export class GlassesTryOn {
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
         this.scene.add(ambientLight);
 
-        
-         // Add adjustable directional light
-        this.directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
-        this.directionalLight.position.set(0, 1, 1);
-        this.scene.add(this.directionalLight);
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+        directionalLight.position.set(0, 1, 1);
+        this.scene.add(directionalLight);
 
-        // Add secondary fill light
-        const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
-        fillLight.position.set(0, -1, -1);
-        this.scene.add(fillLight);
-
-
-
-
-
-        
         this.camera.position.z = 5;
 
         window.addEventListener('resize', () => {
@@ -235,109 +221,52 @@ export class GlassesTryOn {
         requestAnimationFrame(this.animate);
     }
 
-    
     onFaceDetected(results) {
         if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
             const face = results.multiFaceLandmarks[0];
             
             if (this.model) {
-                // Use more precise eye landmarks
-                const leftEyeUpper = face[386];  // Upper left eye landmark
-                const rightEyeUpper = face[159]; // Upper right eye landmark
-                const leftEyeLower = face[374];  // Lower left eye landmark
-                const rightEyeLower = face[145]; // Lower right eye landmark
-                const nose = face[6];    // Nose tip
+                const leftEye = face[133];
+                const rightEye = face[362];
+                const centerX = (leftEye.x + rightEye.x) / 2;
+                const centerY = (leftEye.y + rightEye.y) / 2;
+                const centerZ = (leftEye.z + rightEye.z) / 2;
+
+                // Create target position with user offset
+                const targetPosition = new THREE.Vector3(
+                    -(centerX - 0.5) * 5 + this.userOffset.x,
+                    -(centerY - 0.5) * 5 + this.userOffset.y,
+                    -centerZ * 3
+                );
+
+                const nose = face[6];
                 const leftEar = face[234];
                 const rightEar = face[454];
 
-                // Calculate eye centers more precisely
-                const leftEyeCenter = {
-                    x: (leftEyeUpper.x + leftEyeLower.x) / 2,
-                    y: (leftEyeUpper.y + leftEyeLower.y) / 2,
-                    z: (leftEyeUpper.z + leftEyeLower.z) / 2
-                };
-                
-                const rightEyeCenter = {
-                    x: (rightEyeUpper.x + rightEyeLower.x) / 2,
-                    y: (rightEyeUpper.y + rightEyeLower.y) / 2,
-                    z: (rightEyeUpper.z + rightEyeLower.z) / 2
+                const earDiff = {
+                    x: rightEar.x - leftEar.x,
+                    y: rightEar.y - leftEar.y,
+                    z: rightEar.z - leftEar.z
                 };
 
-                // Calculate face depth
-                const leftEyeToEar = Math.sqrt(
-                    Math.pow(leftEyeCenter.x - leftEar.x, 2) +
-                    Math.pow(leftEyeCenter.y - leftEar.y, 2) +
-                    Math.pow(leftEyeCenter.z - leftEar.z, 2)
-                );
-                const rightEyeToEar = Math.sqrt(
-                    Math.pow(rightEyeCenter.x - rightEar.x, 2) +
-                    Math.pow(rightEyeCenter.y - rightEar.y, 2) +
-                    Math.pow(rightEyeCenter.z - rightEar.z, 2)
-                );
-                const faceDepth = (leftEyeToEar + rightEyeToEar) / 2;
-
-                // Calculate center position with vertical offset
-                const centerX = (leftEyeCenter.x + rightEyeCenter.x) / 2;
-                const centerY = (leftEyeCenter.y + rightEyeCenter.y) / 2;
-                const centerZ = (leftEyeCenter.z + rightEyeCenter.z) / 2;
-
-                // Calculate face angles
-                const yaw = Math.atan2(rightEar.z - leftEar.z, rightEar.x - leftEar.x);
-                const pitch = Math.atan2(nose.z - centerZ, nose.y - centerY);
-                const roll = Math.atan2(
-                    rightEyeCenter.y - leftEyeCenter.y,
-                    rightEyeCenter.x - leftEyeCenter.x
-                );
-
-                // Create target position with adjusted height and depth
-                const targetPosition = new THREE.Vector3(
-                    -(centerX - 0.5) * 5 + this.userOffset.x,
-                    -(centerY - 0.5) * 5 + this.userOffset.y + this.verticalOffset,
-                    -centerZ * 3 * (1 + faceDepth)
-                );
-
-                // Create target rotation
                 const targetRotation = new THREE.Euler(
-                    pitch,
-                    -yaw,
-                    roll * 0.8
-                );
-
-                // Apply distance-based scaling
-                const distanceScale = THREE.MathUtils.lerp(
-                    0.8,
-                    1.2,
-                    THREE.MathUtils.clamp(faceDepth, 0, 1)
+                    Math.atan2(nose.z, nose.y) * 0.5,
+                    -Math.atan2(earDiff.z, earDiff.x) * 0.5,
+                    Math.atan2(earDiff.y, earDiff.x) * 0.3
                 );
 
                 // Apply smoothing only if not actively adjusting
                 if (!this.isAdjusting) {
-                    // Position smoothing
-                    this.lerpVector3(
-                        this.model.position,
-                        targetPosition,
-                        this.smoothingFactor
-                    );
-
-                    // Rotation smoothing
-                    const currentQuaternion = new THREE.Quaternion();
-                    const targetQuaternion = new THREE.Quaternion();
-                    currentQuaternion.setFromEuler(this.model.rotation);
-                    targetQuaternion.setFromEuler(targetRotation);
-                    currentQuaternion.slerp(targetQuaternion, this.smoothingFactor);
-                    this.model.rotation.setFromQuaternion(currentQuaternion);
-
-                    // Scale smoothing
-                    const finalScale = this.baseScale * this.userScaleFactor * distanceScale;
-                    this.model.scale.lerp(
-                        new THREE.Vector3(finalScale, finalScale, finalScale),
-                        this.smoothingFactor
-                    );
+                    this.lerpVector3(this.model.position, targetPosition, this.smoothingFactor);
+                    this.lerpEuler(this.model.rotation, targetRotation, this.smoothingFactor);
                 }
+
+                // Apply user scale
+                const finalScale = this.baseScale * this.userScaleFactor;
+                this.model.scale.set(finalScale, finalScale, finalScale);
             }
         }
     }
-
 
     async loadGlassesModel(modelPath) {
         try {
